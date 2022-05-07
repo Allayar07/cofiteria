@@ -1,0 +1,3 @@
+database_url = "user=postgres password=password0701 dbname=cofiteria sslmode=disable"
+Bind_adr = ":8080"
+log-lev = "debug"
