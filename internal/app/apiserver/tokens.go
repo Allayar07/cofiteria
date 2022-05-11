@@ -1,35 +1,30 @@
 package apiserver
 
 import (
-	"strconv"
+	"cofeeteria/internal/app/model"
+	"log"
+	// "strconv"
 	"time"
 
 	"github.com/dgrijalva/jwt-go"
 )
 
-type TokenManager interface {
-	NewJWT(shtrixcode int, ttl time.Duration) (string, error)
-	Parse(accsessToken string) (string, error)
-	NewRefreshToken() (string, error)
-}
+var Secretkey = []byte("mysecret")
 
-type Manager struct{
-	secretkey string
-}
+func CreateToken(u *model.User) (string, error){
+	
+	claims := jwt.MapClaims{}
+	claims["admin"] = u.IsAdmin
+	claims["isSeller"] = u.IsSeller
+	claims["accountantt"] = u.Accountantt
+	claims["user_id"] = u.Email
+	claims["exp"] = time.Now().Add(time.Hour*1).Unix()
 
-func NewManager(secretkey string) (*Manager, error){
-	if secretkey == "" {
-		return &Manager{secretkey: secretkey}, nil
+	at := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	token, err := at.SignedString(Secretkey)
+	if err != nil {
+		log.Fatal(err)
 	}
 
-	return nil, nil
-}
-
-func (m *Manager) NewJWT(shtrixcode int, ttl time.Duration) (string, error) {
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.StandardClaims{
-		ExpiresAt: time.Now().Add(ttl).Unix(),
-		Subject: strconv.Itoa(shtrixcode) ,
-	})
-
-	return token.SignedString([]byte(m.secretkey))
+	return token, nil
 }

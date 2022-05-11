@@ -12,6 +12,9 @@ type User struct {
 	Password          string `json:"password,omitempty"`
 	EncryptedPassword string `json:"-"`
 	Qrcode            string `json:"qrcode"`
+	IsAdmin			  bool   `json:"isadmin"`
+	IsSeller 		  bool 	 `json:"isseller"`
+	Accountantt 	  bool 	 `json:"accountant"`
 }
 
 func (u *User) BeforeCreated() error {
