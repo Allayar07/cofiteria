@@ -8,6 +8,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"os"
 	"time"
 
 	store "cofeeteria/internal/app/store"
@@ -15,6 +16,7 @@ import (
 	"github.com/dgrijalva/jwt-go"
 	"github.com/gorilla/mux"
 	"github.com/sirupsen/logrus"
+	"github.com/twinj/uuid"
 )
 
 type Server struct {
@@ -40,6 +42,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) SettingRouter() {
+	s.router.HandleFunc("/gettoken", s.GetNewAccess())
 	s.router.HandleFunc("/register", s.Registirate()).Methods("POST")
 	s.router.HandleFunc("/addproduct", middlwear.MultipleMiddleware(s.AddProduct(), s.accountanttMiddlwear, s.Authentication)).Methods("POST")
 	s.router.HandleFunc("/addproduct", middlwear.MultipleMiddleware(s.AddProduct(), s.adminMiddlwear, s.Refreshtoken)).Methods("POST")
@@ -50,6 +53,10 @@ func (s *Server) SettingRouter() {
 	s.router.HandleFunc("/static", s.Statics())
 
 	s.router.HandleFunc("/whoamI", middlwear.MultipleMiddleware(s.WhoamI(), s.Authentication))
+	s.router.HandleFunc("/updateuser", middlwear.MultipleMiddleware(s.UpdateUsers(), s.Authentication)).Methods("POST")
+	s.router.HandleFunc("/updateproduct", middlwear.MultipleMiddleware(s.UpdateProducts(), s.Authentication, s.adminMiddlwear)).Methods("POST")
+	s.router.HandleFunc("/deletproduct", middlwear.MultipleMiddleware(s.DeletProduct(), s.Authentication, s.adminMiddlwear)).Methods("POST")
+	s.router.HandleFunc("/deletuser", middlwear.MultipleMiddleware(s.DeleteUsers(), s.Authentication, s.adminMiddlwear)).Methods("POST")
 
 }
 
@@ -107,8 +114,8 @@ func (s *Server) Login() http.HandlerFunc {
 		}
 
 		u, err := s.store.Users().FincByEmail(req.Email)
-		if err != nil {
-			s.error(w, r, http.StatusBadRequest, err)
+		if err != nil || !u.ComparePassWord(req.Password) {
+			s.error(w, r, http.StatusBadRequest, store.ErrorEmailorPasswd)
 			return
 		}
 
@@ -118,22 +125,31 @@ func (s *Server) Login() http.HandlerFunc {
 			return
 		}
 
-		Cookie := http.Cookie{
-			Name:     "CFT_Token",
-			Value:    token,
+		Cookie1 := http.Cookie{
+			Name:     "ACCessCFT_Token",
+			Value:    token.AccessToken,
 			HttpOnly: true,
 		}
 
-		http.SetCookie(w, &Cookie)
+		http.SetCookie(w, &Cookie1)
 
-		s.Respond(w, r, http.StatusOK, token)
+		Cookie2 := http.Cookie{
+			Name:     "RfrCFT_Token",
+			Value:    token.RefreshToken,
+			HttpOnly: true,
+		}
+
+		http.SetCookie(w, &Cookie2)
+
+		s.Respond(w, r, http.StatusOK, token.AccessToken, token.RefreshToken)
 	}
 }
 
 func (s *Server) Authentication(next http.HandlerFunc) http.HandlerFunc {
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		c, err := r.Cookie("CFT_Token")
+
+		c, err := r.Cookie("RfrCFT_Token")
 		if err != nil {
 			if err == http.ErrNoCookie {
 				s.error(w, r, http.StatusUnauthorized, err)
@@ -145,10 +161,10 @@ func (s *Server) Authentication(next http.HandlerFunc) http.HandlerFunc {
 
 		cookie := c.Value
 
-		claims := jwt.MapClaims{}
+		rtclaims := jwt.MapClaims{}
 
-		token, err := jwt.ParseWithClaims(cookie, claims, func(t *jwt.Token) (interface{}, error) {
-			return Secretkey, nil
+		token, err := jwt.ParseWithClaims(cookie, rtclaims, func(t *jwt.Token) (interface{}, error) {
+			return []byte(os.Getenv("REFRESH_SECRET")), nil
 		})
 		if err != nil {
 			s.error(w, r, http.StatusInternalServerError, errors.New("error su yerde"))
@@ -160,11 +176,37 @@ func (s *Server) Authentication(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
-		email := claims["user_id"].(string)
+		email := rtclaims["user_id"].(string)
 
 		u, err := s.store.Users().FincByEmail(email)
 		if err != nil {
 			s.error(w, r, http.StatusUnauthorized, store.ErrorNotAuthenticate)
+			return
+		}
+		c1, err := r.Cookie("ACCessCFT_Token")
+		if err != nil {
+			if err == http.ErrNoCookie {
+				s.error(w, r, http.StatusUnauthorized, err)
+				return
+			}
+			s.error(w, r, http.StatusBadRequest, err)
+			return
+		}
+
+		cookie1 := c1.Value
+
+		atclaims := jwt.MapClaims{}
+
+		token1, err := jwt.ParseWithClaims(cookie1, atclaims, func(t *jwt.Token) (interface{}, error) {
+			return []byte(os.Getenv("ACCESS_SECRET")), nil
+		})
+		if err != nil {
+			s.error(w, r, http.StatusBadRequest, err)
+			return
+		}
+
+		if !token1.Valid {
+			s.error(w, r, http.StatusUnauthorized, err)
 			return
 		}
 
@@ -173,16 +215,112 @@ func (s *Server) Authentication(next http.HandlerFunc) http.HandlerFunc {
 	})
 }
 
+func (s *Server) GetNewAccess() http.HandlerFunc {
+
+	return func(w http.ResponseWriter, r *http.Request) {
+		c, err := r.Cookie("RfrCFT_Token")
+		if err != nil {
+			if err == http.ErrNoCookie {
+				s.error(w, r, http.StatusUnauthorized, err)
+				return
+			}
+			s.error(w, r, http.StatusBadRequest, err)
+			return
+		}
+
+		cookie := c.Value
+
+		rtclaims := jwt.MapClaims{}
+
+		token, err := jwt.ParseWithClaims(cookie, rtclaims, func(t *jwt.Token) (interface{}, error) {
+			return []byte(os.Getenv("REFRESH_SECRET")), nil
+		})
+		if err != nil {
+			s.error(w, r, http.StatusInternalServerError, errors.New("error su yerde"))
+			return
+		}
+
+		if !token.Valid {
+			s.error(w, r, http.StatusUnauthorized, errors.New("token is not valid !!!!!"))
+			return
+		}
+
+		email := rtclaims["user_id"].(string)
+
+		u, err := s.store.Users().FincByEmail(email)
+		if err != nil {
+			s.error(w, r, http.StatusUnauthorized, store.ErrorNotAuthenticate)
+			return
+		}
+		td := &TokenDetails{}
+		td.AtExpires = time.Now().Add(time.Minute * 1).Unix()
+		td.AccessUuid = uuid.NewV4().String()
+
+		os.Setenv("ACCESS_SECRET", "jdnfksdmfksd") //this should be in an env file
+		atClaims := jwt.MapClaims{}
+		atClaims["admin"] = u.IsAdmin
+		atClaims["access_uuid"] = td.AccessUuid
+		atClaims["isSeller"] = u.IsSeller
+		atClaims["accountantt"] = u.Accountantt
+		atClaims["user_id"] = u.Email
+		atClaims["exp"] = td.AtExpires
+		at := jwt.NewWithClaims(jwt.SigningMethodHS256, atClaims)
+		td.AccessToken, err = at.SignedString([]byte(os.Getenv("ACCESS_SECRET")))
+		if err != nil {
+			s.error(w, r, http.StatusBadRequest, err)
+			return
+		}
+
+		Cookie1 := http.Cookie{
+			Name:     "ACCessCFT_Token",
+			Value:    td.AccessToken,
+			HttpOnly: true,
+		}
+
+		http.SetCookie(w, &Cookie1)
+
+		r.Header.Set("ACCessCFT_Token", td.AccessToken)
+
+		s.Respond(w, r, http.StatusOK, td.AccessToken)
+
+	}
+	
+}
+
+
 func (s *Server) WhoamI() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		s.Respond(w, r, http.StatusOK, r.Context().Value(store.CntKey).(*model.User))
 	}
 }
 
+func (s *Server) DeleteUsers() http.HandlerFunc {
+	type Request struct {
+		ID int `json:"id"`
+	}
+
+	return func(w http.ResponseWriter, r *http.Request) {
+		req := &Request{}
+
+		if err := json.NewDecoder(r.Body).Decode(req); err != nil {
+			s.error(w, r, http.StatusBadRequest, err)
+			return
+		}
+
+		err := s.store.Users().DeletUser(req.ID)
+		if err != nil {
+			s.error(w, r, http.StatusInternalServerError, err)
+			return
+		}
+
+		s.Respond(w, r, http.StatusOK, "udalit edildi")
+	}
+}
+
 func (s *Server) adminMiddlwear(next http.HandlerFunc) http.HandlerFunc {
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		c, err := r.Cookie("CFT_Token")
+		c, err := r.Cookie("ACCessCFT_Token")
 		if err != nil {
 			if err == http.ErrNoCookie {
 				s.error(w, r, http.StatusUnauthorized, err)
@@ -230,7 +368,7 @@ func (s *Server) adminMiddlwear(next http.HandlerFunc) http.HandlerFunc {
 func (s *Server) sellerMiddlwear(next http.HandlerFunc) http.HandlerFunc {
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		c, err := r.Cookie("CFT_Token")
+		c, err := r.Cookie("ACCessCFT_Token")
 		if err != nil {
 			if err == http.ErrNoCookie {
 				s.error(w, r, http.StatusUnauthorized, err)
@@ -268,7 +406,7 @@ func (s *Server) sellerMiddlwear(next http.HandlerFunc) http.HandlerFunc {
 func (s *Server) accountanttMiddlwear(next http.HandlerFunc) http.HandlerFunc {
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		c, err := r.Cookie("CFT_Token")
+		c, err := r.Cookie("ACCessCFT_Token")
 		if err != nil {
 			if err == http.ErrNoCookie {
 				s.error(w, r, http.StatusUnauthorized, err)
@@ -307,7 +445,7 @@ func (s *Server) Refreshtoken(next http.HandlerFunc) http.HandlerFunc {
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 
-		c, err := r.Cookie("CFT_Token")
+		c, err := r.Cookie("ACCessCFT_Token")
 		if err != nil {
 			if err == http.ErrNoCookie {
 				s.error(w, r, http.StatusUnauthorized, err)
@@ -322,7 +460,7 @@ func (s *Server) Refreshtoken(next http.HandlerFunc) http.HandlerFunc {
 		claims := jwt.MapClaims{}
 
 		token, err := jwt.ParseWithClaims(cookie, claims, func(t *jwt.Token) (interface{}, error) {
-			return Secretkey, nil
+			return []byte(os.Getenv("ACCESS_SECRET")), nil
 		})
 		if err != nil {
 			s.error(w, r, http.StatusInternalServerError, err)
@@ -330,8 +468,7 @@ func (s *Server) Refreshtoken(next http.HandlerFunc) http.HandlerFunc {
 		}
 
 		if !token.Valid {
-			s.error(w, r, http.StatusUnauthorized, errors.New("token is not valid !!!!!"))
-			return
+
 		}
 		email := claims["user_id"].(string)
 
@@ -340,7 +477,7 @@ func (s *Server) Refreshtoken(next http.HandlerFunc) http.HandlerFunc {
 			s.error(w, r, http.StatusUnauthorized, store.ErrorNotAuthenticate)
 			return
 		}
-		
+
 		if claims["exp"] == time.Millisecond {
 			expirationtime := time.Now().Add(24 * time.Hour)
 			claims["exp"] = expirationtime.Unix()
@@ -424,10 +561,9 @@ func (s *Server) AddProduct() http.HandlerFunc {
 func (s *Server) SellProduct() http.HandlerFunc {
 
 	type Request struct {
-		ShtrixCode int     `json:"shtrixcode"`
-		Cost       float32 `json:"cost"`
-		Sany       int     `json:"sany"`
-		Alyjy      string  `json:"alyjy"`
+		ShtrixCode int    `json:"shtrixcode"`
+		Sany       int    `json:"sany"`
+		Alyjy      string `json:"alyjy"`
 	}
 
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -438,29 +574,108 @@ func (s *Server) SellProduct() http.HandlerFunc {
 			return
 		}
 
-		p := &model.Product{
-			ShtrixCode: req.ShtrixCode,
-			Cost:       req.Cost,
-			Sany:       req.Sany,
-		}
-
-		prod, err := s.store.Users().Ayyrmak(p, req.Sany, int(req.Cost))
+		prd, err := s.store.Users().FindByShtrix(req.ShtrixCode)
 		if err != nil {
 			s.error(w, r, http.StatusInternalServerError, err)
 			return
 		}
 
-		// p2 := &model.Product2{
-		// 	ID:         prod.ID,
-		// 	Name:       prod.Name,
-		// 	ShtrixCode: req.ShtrixCode,
-		// 	Cost:       req.Cost,
-		// 	Sany:       req.Sany,
-		// 	Total:      float64(float32(req.Sany) * req.Cost),
-		// 	Alyjy:      req.Alyjy,
-		// }
+		prod, err := s.store.Users().Ayyrmak(prd, float32(req.Sany))
+		if err != nil {
+			s.error(w, r, http.StatusInternalServerError, err)
+			return
+		}
 
-		s.Respond(w, r, http.StatusOK, prod)
+		p := &model.Product3{
+			Total: float64(req.Sany) * float64(prod.Cost),
+		}
+
+		s.Respond(w, r, http.StatusOK, p.Total, prod)
+	}
+}
+
+func (s *Server) DeletProduct() http.HandlerFunc {
+	type Request struct {
+		ID         int `json:"id"`
+		ShtrixCode int `json:"shtrixcode"`
+	}
+
+	return func(w http.ResponseWriter, r *http.Request) {
+		req := &Request{}
+
+		if err := json.NewDecoder(r.Body).Decode(req); err != nil {
+			s.error(w, r, http.StatusBadRequest, err)
+			return
+		}
+
+		prd, err := s.store.Users().DeletProduct(req.ID)
+		if err != nil {
+			s.error(w, r, http.StatusInternalServerError, err)
+			return
+		}
+
+		s.Respond(w, r, http.StatusOK, prd)
+	}
+}
+
+func (s *Server) UpdateProducts() http.HandlerFunc {
+
+	type Request struct {
+		ID         int     `json:"id"`
+		Name       string  `json:"name"`
+		Cost       float32 `json:"cost"`
+		AlynanBaha float32 `json:"alynanbaha"`
+		Sany       int     `json:"sany"`
+		ShtrixCode int     `json:"shtrixcode"`
+	}
+
+	return func(w http.ResponseWriter, r *http.Request) {
+		req := &Request{}
+
+		if err := json.NewDecoder(r.Body).Decode(req); err != nil {
+			s.error(w, r, http.StatusBadRequest, err)
+			return
+		}
+
+		prd, err := s.store.Users().FindByShtrix(req.ShtrixCode)
+		if err != nil {
+			s.error(w, r, http.StatusInternalServerError, err)
+			return
+		}
+
+		p, err := s.store.Users().UpdateProduct(prd, req.Name, float32(req.Sany), req.Cost, req.AlynanBaha)
+		if err != nil {
+			s.error(w, r, http.StatusInternalServerError, err)
+			return
+		}
+
+		s.Respond(w, r, http.StatusOK, p)
+	}
+}
+
+func (s *Server) UpdateUsers() http.HandlerFunc {
+	type Request struct {
+		ID     int    `json:"id"`
+		Name   string `json:"name"`
+		Wezipe string `json:"wezipe"`
+		Photo  string `json:"photo"`
+	}
+
+	return func(w http.ResponseWriter, r *http.Request) {
+		req := &Request{}
+
+		if err := json.NewDecoder(r.Body).Decode(req); err != nil {
+			s.error(w, r, http.StatusBadRequest, err)
+			return
+		}
+
+		u, err := s.store.Users().UpdateUser(req.Name, req.Wezipe, req.Photo, req.ID)
+		if err != nil {
+			s.error(w, r, http.StatusInternalServerError, err)
+			return
+		}
+
+		s.Respond(w, r, http.StatusOK, u)
 	}
 }
 
@@ -473,12 +688,7 @@ func (s *Server) Statics() http.HandlerFunc {
 			return
 		}
 
-		prd := &model.Product2{
-			Satylansany: p.Satylansany,
-			Totalcost:   p.Totalcost,
-		}
-
-		s.Respond(w, r, http.StatusOK, prd)
+		s.Respond(w, r, http.StatusOK, p)
 	}
 }
 
@@ -486,7 +696,7 @@ func (s *Server) error(w http.ResponseWriter, r *http.Request, code int, err err
 	s.Respond(w, r, code, map[string]string{"error": err.Error()})
 }
 
-func (s *Server) Respond(w http.ResponseWriter, r *http.Request, code int, data interface{}) {
+func (s *Server) Respond(w http.ResponseWriter, r *http.Request, code int, data ...interface{}) {
 	w.WriteHeader(code)
 
 	if data != nil {

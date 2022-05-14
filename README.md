@@ -17,7 +17,7 @@ create table product (
 	name varchar,
 	cost real,
 	alynanbaha real,
-	sany integer,
+	sany real,
 	shtrixcode integer,
 	satylansany integer,
 	totalcost real
@@ -25,11 +25,8 @@ create table product (
 
 create table statistic (
 	id bigserial not null primary key,
-	name varchar,
-	cost real,
-	alynanbaha real,
-	sany integer,
-	shtrixcode integer
+	satylansany real,
+	totalcost real
 );
 
 ### UPDATA DATA

@@ -11,6 +11,10 @@ type UsersRepository interface {
 	FindByShtrix(int) (*model.Product, error)
 	Exist(*model.Product) (bool, error)
 	AddSany(*model.Product, int) (*model.Product, error)
-	Ayyrmak(*model.Product, int, int) (*model.Product, error)
-	GivStatic() (*model.Product, error)
+	Ayyrmak(*model.Product, float32) (*model.Product, error)
+	GivStatic() (*model.Product2, error)
+	UpdateProduct(*model.Product, string, float32, float32, float32) (*model.Product, error)
+	UpdateUser(string, string, string, int) (*model.User, error)
+	DeletProduct(id int) (*model.Product ,error)
+	DeletUser(int) ( error)
 }
