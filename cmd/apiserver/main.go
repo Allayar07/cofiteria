@@ -13,7 +13,9 @@ var (
 )
 
 func init() {
+
 	flag.StringVar(&pathConfig, "configs-path", "configs/api.toml", "path to config")
+	
 }
 
 func main() {
@@ -23,11 +25,15 @@ func main() {
 	config := apiserver.NewConfig()
 
 	_, err := toml.DecodeFile(pathConfig, config)
-	if err != nil{
+	if err != nil {
+
 		log.Fatal(err)
+
 	}
 
 	if err := apiserver.Start(config); err != nil {
+
 		log.Fatal(err)
+
 	}
 }

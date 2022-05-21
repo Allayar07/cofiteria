@@ -5,11 +5,11 @@ create table users (
 	name varchar,
 	wezipe varchar,
 	email varchar not null unique,
-	encryptedPassword varchar not null,
+	encryptedpassword varchar not null,
 	qrcode varchar,
 	isadmin boolean,
 	isseller boolean,
-	accountant boolean
+	accountantt boolean
 );
 
 create table product (
@@ -18,9 +18,7 @@ create table product (
 	cost real,
 	alynanbaha real,
 	sany real,
-	shtrixcode integer,
-	satylansany integer,
-	totalcost real
+	shtrixcode integer
 );
 
 create table statistic (

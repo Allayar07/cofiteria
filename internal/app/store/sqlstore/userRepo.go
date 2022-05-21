@@ -12,27 +12,49 @@ type UserRepository struct {
 
 func (req *UserRepository) CreateUser(u *model.User) error {
 
+	if err := u.ValidateUser(); err != nil {
+		return err
+	}
+
 	if err := u.BeforeCreated(); err != nil {
 		return err
 	}
 
 	return req.store.Db.QueryRow(
-		"INSERT INTO users (name, email, encryptedPassword, isadmin, isseller, accountant) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id",
+		`INSERT INTO users (
+			name,
+			email,
+			encryptedpassword,
+			isadmin,
+			isseller,
+			accountantt,
+			photo,
+			wezipe,
+			qrcode) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
 		u.Name,
 		u.Email,
 		u.EncryptedPassword,
 		u.IsAdmin,
 		u.IsSeller,
 		u.Accountantt,
+		u.Photo,
+		u.Wezipe,
+		u.Qrcode,
 	).Scan(&u.ID)
 }
 
-func (req *UserRepository) FincByEmail(email string) (*model.User, error) {
+func (req *UserRepository) FindByEmail(email string) (*model.User, error) {
 	u := &model.User{}
 
-	if err := req.store.Db.QueryRow(
-		"SELECT id, name, email, encryptedPassword, isadmin, isseller, accountant FROM users WHERE email = $1",
-		email).Scan(
+	err := req.store.Db.QueryRow(
+		`SELECT 
+		id,
+		name,
+		email,
+		encryptedpassword,
+		isadmin,
+		isseller,
+		accountantt FROM users WHERE email = $1`, email).Scan(
 		&u.ID,
 		&u.Name,
 		&u.Email,
@@ -40,58 +62,117 @@ func (req *UserRepository) FincByEmail(email string) (*model.User, error) {
 		&u.IsAdmin,
 		&u.IsSeller,
 		&u.Accountantt,
-	); err != nil {
+	)
+
+	if err != nil {
+
 		if err == sql.ErrNoRows {
 			return nil, store.ErrorNotFoundRecord
 		}
+
 		return nil, err
 	}
 
 	return u, nil
 }
 
-func (req *UserRepository) UpdateUser(name, wezipe, photo string, id int) (*model.User, error) {
+func (req *UserRepository) UpdateUser(name, wezipe, photo, qrcode string, isadmin, isseller, accountantt bool, id int) (*model.User, error) {
+
 	u := &model.User{}
 
-	str := `UPDATE users SET name = $1, wezipe = $2, photo = $3 WHERE id = $4 RETURNING *`
-	err := req.store.Db.QueryRow(str, name, wezipe, photo, id).Scan(
+	str := `UPDATE users SET
+	photo = $1,
+	name = $2,
+	wezipe = $3,
+	qrcode = $4,
+	isadmin = $5,
+	isseller = $6,
+	accountantt = $7 WHERE id = $8 RETURNING *`
+
+	err := req.store.Db.QueryRow(str, photo, name, wezipe, qrcode, isadmin, isseller, accountantt, id).Scan(
 		&u.ID,
+		&u.Photo,
 		&u.Name,
+		&u.Wezipe,
 		&u.Email,
 		&u.EncryptedPassword,
-		&u.Photo,
-		&u.Wezipe,
-		&u.Surname,
+		&u.Qrcode,
+		&u.IsAdmin,
+		&u.IsSeller,
+		&u.Accountantt,
 	)
+
 	if err != nil {
+
 		if err == sql.ErrNoRows {
 			return nil, store.ErrorNotFoundRecord
 		}
+
 		return nil, err
 	}
 
 	return u, nil
 }
 
-func (req *UserRepository) DeletUser(id int)  error {
+func (req *UserRepository) DeletUser(id int) error {
 
-	_, err := req.store.Db.Query("DELETE FROM users WHERE id=$1 returning *", id)
+	u := &model.User{}
+
+	err := req.store.Db.QueryRow("DELETE FROM users WHERE id=$1 returning *", id).Scan(
+		&u.ID,
+		&u.Photo,
+		&u.Name,
+		&u.Wezipe,
+		&u.Email,
+		&u.EncryptedPassword,
+		&u.Qrcode,
+		&u.IsAdmin,
+		&u.IsSeller,
+		&u.Accountantt,
+	)
 
 	if err != nil {
+
 		if err == sql.ErrNoRows {
 			return store.ErrorNotFoundRecord
 		}
+
 		return err
 	}
 
-	return  nil
+	return nil
 
+}
+
+func (req *UserRepository) GetAllusers() (*sql.Rows, error) {
+
+	rows, err := req.store.Db.Query("Select * from users")
+	if err != nil {
+
+		if err == sql.ErrNoRows {
+			return nil, store.ErrorNotFoundRecord
+		}
+
+		return nil, err
+	}
+
+	return rows, nil
 }
 
 func (req *UserRepository) CreateProduct(p *model.Product) error {
 
+	if err := p.ValidateProduct(); err != nil {
+		return err
+	}
+
 	return req.store.Db.QueryRow(
-		"INSERT INTO product (name, cost, alynanbaha, sany, shtrixcode, satylansany, totalcost) VALUES ($1,$2,$3,$4,$5,0,0) RETURNING id",
+		`INSERT INTO product (
+			name,
+			cost,
+			alynanbaha,
+			sany,
+			shtrixcode
+			) VALUES ($1,$2,$3,$4,$5) RETURNING id`,
 		p.Name,
 		p.Cost,
 		p.AlynanBaha,
@@ -116,7 +197,7 @@ func (req *UserRepository) FindByShtrix(num int) (*model.Product, error) {
 		&p.ShtrixCode,
 	)
 	if err != nil {
-		return nil, err
+		return nil, store.ErrorNotFoundRecord
 	}
 
 	return p, nil
@@ -135,8 +216,6 @@ func (req *UserRepository) AddSany(p *model.Product, num int) (*model.Product, e
 		&p.AlynanBaha,
 		&p.Sany,
 		&p.ShtrixCode,
-		&p.Satylansany,
-		&p.Totalcost,
 	)
 	if err != nil {
 		return nil, err
@@ -147,14 +226,20 @@ func (req *UserRepository) AddSany(p *model.Product, num int) (*model.Product, e
 
 func (req *UserRepository) Ayyrmak(p *model.Product, sany float32) (*model.Product, error) {
 
-	_, errr := req.store.Db.Query("update statistic set satylansany = $1 + satylansany, totalcost= $1*$2 + totalcost where id = 1", sany, p.Cost)
+	_, errr := req.store.Db.Query(`
+	update statistic set 
+	satylansany = $1 + satylansany,
+	totalcost= $1*$2 + totalcost where id = 1`,
+		sany,
+		p.Cost,
+	)
+
 	if errr != nil {
 		return nil, errr
 	}
 	err := req.store.Db.QueryRow(
-		"update product set sany=sany - $1, satylansany=$1 + satylansany, totalcost=$1*$2 + totalcost where shtrixcode = $3 returning *",
+		"update product set sany=sany - $1 where shtrixcode = $2 returning *",
 		sany,
-		p.Cost,
 		p.ShtrixCode,
 	).Scan(
 		&p.ID,
@@ -163,8 +248,6 @@ func (req *UserRepository) Ayyrmak(p *model.Product, sany float32) (*model.Produ
 		&p.AlynanBaha,
 		&p.Sany,
 		&p.ShtrixCode,
-		&p.Satylansany,
-		&p.Totalcost,
 	)
 	if err != nil {
 		return nil, err
@@ -183,10 +266,9 @@ func (req *UserRepository) Exist(p *model.Product) (bool, error) {
 		&p.AlynanBaha,
 		&p.Sany,
 		&p.ShtrixCode,
-		&p.Satylansany,
-		&p.Totalcost,
 	)
 	if err != nil {
+
 		if err == sql.ErrNoRows {
 			return false, nil
 		}
@@ -197,7 +279,12 @@ func (req *UserRepository) Exist(p *model.Product) (bool, error) {
 
 func (req *UserRepository) UpdateProduct(p *model.Product, name string, sany, cost, alynanbaha float32) (*model.Product, error) {
 
-	str := `UPDATE product SET name = $1, cost = $2, alynanbaha = $3, sany = $4 WHERE shtrixcode = $5 RETURNING *`
+	str := `UPDATE product SET
+	name = $1,
+	cost = $2,
+	alynanbaha = $3,
+	sany = $4 WHERE shtrixcode = $5 RETURNING *`
+
 	err := req.store.Db.QueryRow(str, name, cost, alynanbaha, sany, p.ShtrixCode).Scan(
 		&p.ID,
 		&p.Name,
@@ -205,13 +292,13 @@ func (req *UserRepository) UpdateProduct(p *model.Product, name string, sany, co
 		&p.AlynanBaha,
 		&p.Sany,
 		&p.ShtrixCode,
-		&p.Satylansany,
-		&p.Totalcost,
 	)
 	if err != nil {
+
 		if err == sql.ErrNoRows {
 			return nil, store.ErrorNotFoundRecord
 		}
+
 		return nil, err
 	}
 
@@ -219,6 +306,7 @@ func (req *UserRepository) UpdateProduct(p *model.Product, name string, sany, co
 }
 
 func (req *UserRepository) DeletProduct(id int) (*model.Product, error) {
+
 	p := &model.Product{}
 
 	err := req.store.Db.QueryRow("DELETE FROM product WHERE id=$1 returning *", id).Scan(
@@ -228,18 +316,34 @@ func (req *UserRepository) DeletProduct(id int) (*model.Product, error) {
 		&p.AlynanBaha,
 		&p.Sany,
 		&p.ShtrixCode,
-		&p.Satylansany,
-		&p.Totalcost,
 	)
 	if err != nil {
+
 		if err == sql.ErrNoRows {
 			return nil, store.ErrorNotFoundRecord
 		}
+
 		return nil, err
 	}
 
 	return p, nil
 
+}
+
+func (req *UserRepository) GetAllProduct() (*sql.Rows, error) {
+
+	rows, err := req.store.Db.Query("Select * from product")
+
+	if err != nil {
+
+		if err == sql.ErrNoRows {
+			return nil, store.ErrorNotFoundRecord
+		}
+
+		return nil, err
+	}
+
+	return rows, nil
 }
 
 func (req *UserRepository) GivStatic() (*model.Product2, error) {
@@ -253,7 +357,7 @@ func (req *UserRepository) GivStatic() (*model.Product2, error) {
 	)
 
 	if err != nil {
-		return nil, err
+		return nil, store.ErrorNotFoundRecord
 	}
 
 	return p, nil
