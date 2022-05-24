@@ -7,9 +7,7 @@ create table users (
 	email varchar not null unique,
 	encryptedpassword varchar not null,
 	qrcode varchar,
-	isadmin boolean,
-	isseller boolean,
-	accountantt boolean
+	role  varchar
 );
 
 create table product (
