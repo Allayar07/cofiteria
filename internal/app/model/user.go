@@ -15,9 +15,7 @@ type User struct {
 	Password          string `json:"password,omitempty"`
 	EncryptedPassword string `json:"-"`
 	Qrcode            string `json:"qrcode"`
-	IsAdmin           bool   `json:"isadmin"`
-	IsSeller          bool   `json:"isseller"`
-	Accountantt       bool   `json:"accountantt"`
+	Role              string `json:"role"`
 }
 
 func (u *User) BeforeCreated() error {
@@ -61,12 +59,8 @@ func (u *User) ValidateUser() error {
 	return validation.ValidateStruct(
 		u,
 		validation.Field(
-			&u.Email,
-			validation.Required,
-			is.Email),
+			&u.Email, validation.Required, is.Email),
 		validation.Field(
-			&u.Password,
-			validation.By(RequiredIF(u.EncryptedPassword == "")),
-			validation.Length(5, 10)),
+			&u.Password, validation.By(RequiredIF(u.EncryptedPassword == "")), validation.Length(5, 10)),
 	)
 }

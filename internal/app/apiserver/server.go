@@ -45,6 +45,7 @@ func (s *Server) SettingRouter() {
 	/*  Users  */
 
 	s.router.Use(s.LogRequest)
+	s.router.HandleFunc("/Getbyemail", s.GetByemail())
 	s.router.HandleFunc("/register", middlwear.MultipleMiddleware(
 		s.Registirate(),
 		s.Authentication,
@@ -117,15 +118,13 @@ func (s *Server) SettingRouter() {
 func (s *Server) Registirate() http.HandlerFunc {
 
 	type Request struct {
-		Photo       string `json:"photo"`
-		Name        string `json:"name"`
-		Wezipe      string `json:"wezipe"`
-		Email       string `json:"email"`
-		Password    string `json:"password,omitempty"`
-		Qrcode      string `json:"qrcode"`
-		IsAdmin     bool   `json:"isadmin"`
-		IsSeller    bool   `json:"isseller"`
-		Accountantt bool   `json:"accountantt"`
+		Photo    string `json:"photo"`
+		Name     string `json:"name"`
+		Wezipe   string `json:"wezipe"`
+		Email    string `json:"email"`
+		Password string `json:"password,omitempty"`
+		Qrcode   string `json:"qrcode"`
+		Role     string `json:"role"`
 	}
 
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -172,20 +171,25 @@ func (s *Server) Registirate() http.HandlerFunc {
 			return
 		}
 
+		err = model.ValidateAny(req.Role)
+		if err != nil {
+			s.error(w, r, http.StatusBadRequest, errors.New("role can not be blank"))
+			return
+		}
+
 		u := &model.User{
-			Name:        req.Name,
-			Email:       req.Email,
-			Password:    req.Password,
-			IsAdmin:     req.IsAdmin,
-			IsSeller:    req.IsSeller,
-			Accountantt: req.Accountantt,
-			Photo:       req.Photo,
-			Qrcode:      req.Qrcode,
-			Wezipe:      req.Wezipe,
+			Name:     req.Name,
+			Email:    req.Email,
+			Password: req.Password,
+			Role:     req.Role,
+			Photo:    req.Photo,
+			Qrcode:   req.Qrcode,
+			Wezipe:   req.Wezipe,
 		}
 
 		if err := s.store.Users().CreateUser(u); err != nil {
 			s.error(w, r, http.StatusUnprocessableEntity, err)
+			return
 		}
 
 		u.Parolgizle()
@@ -219,6 +223,7 @@ func (s *Server) GetByemail() http.HandlerFunc {
 		u, err := s.store.Users().FindByEmail(req.Email)
 		if err != nil {
 			s.error(w, r, http.StatusBadRequest, err)
+			return
 		}
 
 		s.Respond(w, r, http.StatusOK, u)
@@ -281,7 +286,21 @@ func (s *Server) Login() http.HandlerFunc {
 
 		http.SetCookie(w, &Cookie2)
 
-		s.Respond(w, r, http.StatusOK, token.AccessToken, token.RefreshToken)
+		type Result struct {
+			AccessToken  string `json:"access_token"`
+			RefreshToken string `json:"refresh_token"`
+			StatusText   string `json:"status_text"`
+			StatusCode   int    `json:"status_code"`
+		}
+		var result Result
+
+		result.AccessToken = token.AccessToken
+		result.RefreshToken = token.RefreshToken
+		result.StatusCode = http.StatusOK
+		result.StatusText = http.StatusText(http.StatusOK)
+
+		_ = json.NewEncoder(w).Encode(result)
+
 	}
 }
 
@@ -362,14 +381,7 @@ func (s *Server) Authentication(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
-		email := atclaims["user_id"].(string)
-
-		u, err := s.store.Users().FindByEmail(email)
-		if err != nil {
-			s.error(w, r, http.StatusUnauthorized, store.ErrorNotAuthenticate)
-			return
-		}
-		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), store.CntKey, u)))
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), store.CntKey, nil)))
 
 	})
 }
@@ -430,10 +442,8 @@ func (s *Server) GetNewAccess() http.HandlerFunc {
 
 		atClaims := jwt.MapClaims{}
 
-		atClaims["admin"] = u.IsAdmin
+		atClaims["role"] = u.Role
 		atClaims["access_uuid"] = td.AccessUuid
-		atClaims["isSeller"] = u.IsSeller
-		atClaims["accountantt"] = u.Accountantt
 		atClaims["user_id"] = u.Email
 		atClaims["exp"] = td.AtExpires
 
@@ -454,8 +464,16 @@ func (s *Server) GetNewAccess() http.HandlerFunc {
 		http.SetCookie(w, &Cookie1)
 
 		r.Header.Set("ACCessCFT_Token", td.AccessToken)
-
-		s.SpecailRespond(w, r, http.StatusOK, td.AccessToken)
+		type Result struct {
+			AccessToken string `json:"access_token"`
+			StatusText  string `json:"status_text"`
+			StatusCode  int    `json:"status_code"`
+		}
+		var result Result
+		result.StatusCode = http.StatusOK
+		result.StatusText = http.StatusText(http.StatusOK)
+		result.AccessToken = td.AccessToken
+		_ = json.NewEncoder(w).Encode(result)
 
 	}
 
@@ -497,7 +515,18 @@ func (s *Server) DeleteUsers() http.HandlerFunc {
 			return
 		}
 
-		s.Respond(w, r, http.StatusOK, "udalit edildi")
+		type Result struct {
+			Code       int    `json:"code"`
+			StatusText string `json:"status_text"`
+		}
+
+		var result Result
+
+		result.Code = http.StatusOK
+		result.StatusText = http.StatusText(http.StatusOK)
+
+		_ = json.NewEncoder(w).Encode(result)
+
 	}
 }
 
@@ -541,20 +570,11 @@ func (s *Server) adminMiddlwear(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
-		if !claims["admin"].(bool) {
+		if claims["role"].(string) != "admin" {
 			s.error(w, r, http.StatusForbidden, errors.New("bu sahypa dosdubynyz yok"))
 			return
 		}
 
-		if !claims["isSeller"].(bool) {
-			s.error(w, r, http.StatusForbidden, errors.New("bu sahypa dosdubynyz yok bu statyjy ucn"))
-			return
-		}
-
-		if !claims["accountantt"].(bool) {
-			s.error(w, r, http.StatusForbidden, errors.New("bu sahypa dosdubynyz yok bu buhgalter ucn"))
-			return
-		}
 		next.ServeHTTP(w, r)
 	})
 }
@@ -596,7 +616,7 @@ func (s *Server) sellerMiddlwear(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
-		if !claims["isSeller"].(bool) {
+		if claims["role"].(string) != "satyjy" {
 			s.error(w, r, http.StatusForbidden, errors.New("bu sahypa dosdubynyz yok bu statyjy ucn"))
 			return
 		}
@@ -641,7 +661,7 @@ func (s *Server) accountanttMiddlwear(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
-		if !claims["accountantt"].(bool) {
+		if claims["role"].(string) != "hasapcy" {
 			s.error(w, r, http.StatusForbidden, errors.New("bu sahypa dosdubynyz yok bu buhgalter ucn"))
 			return
 		}
@@ -715,6 +735,7 @@ func (s *Server) AddProduct() http.HandlerFunc {
 			err := s.store.Users().CreateProduct(p)
 			if err != nil {
 				s.error(w, r, http.StatusUnprocessableEntity, err)
+				return
 			}
 			s.Respond(w, r, http.StatusCreated, p)
 
@@ -783,11 +804,20 @@ func (s *Server) SellProduct() http.HandlerFunc {
 			return
 		}
 
-		p := &model.Product3{
-			Total: float64(req.Sany) * float64(prod.Cost),
+		type Result struct {
+			Total   float64     `json:"total_cost"`
+			Product interface{} `json:"product"`
+			Alyjy   string      `json:"alyjy"`
 		}
 
-		s.Respond(w, r, http.StatusOK, p.Total, prod, req.Alyjy)
+		var result Result
+
+		result.Total = float64(req.Sany) * float64(prod.Cost)
+		result.Product = prod
+		result.Alyjy = req.Alyjy
+
+		_ = json.NewEncoder(w).Encode(result)
+
 	}
 }
 
@@ -812,13 +842,23 @@ func (s *Server) DeletProduct() http.HandlerFunc {
 			return
 		}
 
-		prd, err := s.store.Users().DeletProduct(req.ID)
+		_, err = s.store.Users().DeletProduct(req.ID)
 		if err != nil {
 			s.error(w, r, http.StatusNotFound, err)
 			return
 		}
+		type Result struct {
+			Code       int    `json:"code"`
+			StatusText string `json:"status_text"`
+		}
 
-		s.SpecailRespond(w, r, http.StatusOK, prd)
+		var result Result
+
+		result.Code = http.StatusOK
+		result.StatusText = http.StatusText(http.StatusOK)
+
+		_ = json.NewEncoder(w).Encode(result)
+
 	}
 }
 
@@ -898,14 +938,12 @@ func (s *Server) UpdateProducts() http.HandlerFunc {
 func (s *Server) UpdateUsers() http.HandlerFunc {
 
 	type Request struct {
-		ID          int    `json:"id"`
-		Photo       string `json:"photo"`
-		Name        string `json:"name"`
-		Wezipe      string `json:"wezipe"`
-		Qrcode      string `json:"qrcode"`
-		IsAdmin     bool   `json:"isadmin"`
-		IsSeller    bool   `json:"isseller"`
-		Accountantt bool   `json:"accountantt"`
+		ID     int    `json:"id"`
+		Photo  string `json:"photo"`
+		Name   string `json:"name"`
+		Wezipe string `json:"wezipe"`
+		Qrcode string `json:"qrcode"`
+		Role   string `json:"role"`
 	}
 
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -940,15 +978,18 @@ func (s *Server) UpdateUsers() http.HandlerFunc {
 			s.error(w, r, http.StatusBadRequest, errors.New("qrcode can not be blank"))
 			return
 		}
+		err = model.ValidateAny(req.Role)
+		if err != nil {
+			s.error(w, r, http.StatusBadRequest, errors.New("role can not be blank"))
+			return
+		}
 
 		u, err := s.store.Users().UpdateUser(
 			req.Name,
 			req.Wezipe,
 			req.Photo,
 			req.Qrcode,
-			req.IsAdmin,
-			req.IsSeller,
-			req.Accountantt,
+			req.Role,
 			req.ID,
 		)
 
@@ -986,9 +1027,7 @@ func (s *Server) GetAll_Users() http.HandlerFunc {
 				&user.Email,
 				&user.Qrcode,
 				&user.Qrcode,
-				&user.IsAdmin,
-				&user.IsSeller,
-				&user.Accountantt,
+				&user.Role,
 			)
 			if err != nil {
 				s.error(w, r, http.StatusNotFound, store.ErrorNotFoundRecord)
@@ -997,11 +1036,8 @@ func (s *Server) GetAll_Users() http.HandlerFunc {
 
 			Users = append(Users, user)
 		}
+		_ = json.NewEncoder(w).Encode(Users)
 
-		for i := 0; i < len(Users); i++ {
-
-			s.Respond(w, r, http.StatusOK, Users[i])
-		}
 	}
 }
 
@@ -1037,11 +1073,9 @@ func (s *Server) GetAll_Products() http.HandlerFunc {
 
 			Products = append(Products, product)
 		}
-		for i := 0; i < len(Products); i++ {
 
-			s.Respond(w, r, http.StatusOK, Products[i])
+		_ = json.NewEncoder(w).Encode(Products)
 
-		}
 	}
 }
 
@@ -1074,13 +1108,7 @@ func (s *Server) Respond(w http.ResponseWriter, r *http.Request, code int, data 
 
 		for i := 0; i < len(data); i++ {
 
-			// byteString, err := json.MarshalIndent(data[i], "", "")
-			// if err != nil {
-			// 	log.Fatal(err)
-			// }
-
 			json.NewEncoder(w).Encode(data[i])
-			// w.Write(byteString)
 
 		}
 	}
@@ -1090,15 +1118,17 @@ func (s *Server) SpecailRespond(w http.ResponseWriter, r *http.Request, code int
 
 	w.WriteHeader(code)
 
-	if data != nil {
-
-		json.NewEncoder(w).Encode(data)
-
+	type Result struct {
+		Data       interface{} `json:"data"`
+		StatusText string      `json:"status_text"`
+		StatusCode int         `json:"status_code"`
 	}
-	s.Respond(w, r, code, map[string]interface{}{
-		"code":        code,
-		"Status Text": http.StatusText(code),
-	})
+	var result Result
+	result.StatusCode = code
+	result.StatusText = http.StatusText(code)
+	result.Data = data
+	
+	json.NewEncoder(w).Encode(result)
 }
 
 func (s *Server) LogRequest(param http.Handler) http.Handler {

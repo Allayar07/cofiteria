@@ -25,18 +25,14 @@ func (req *UserRepository) CreateUser(u *model.User) error {
 			name,
 			email,
 			encryptedpassword,
-			isadmin,
-			isseller,
-			accountantt,
+			role,
 			photo,
 			wezipe,
-			qrcode) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
+			qrcode) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
 		u.Name,
 		u.Email,
 		u.EncryptedPassword,
-		u.IsAdmin,
-		u.IsSeller,
-		u.Accountantt,
+		u.Role,
 		u.Photo,
 		u.Wezipe,
 		u.Qrcode,
@@ -47,21 +43,23 @@ func (req *UserRepository) FindByEmail(email string) (*model.User, error) {
 	u := &model.User{}
 
 	err := req.store.Db.QueryRow(
-		`SELECT 
+		`SELECT
 		id,
+		photo,
 		name,
+		wezipe,
 		email,
-		encryptedpassword,
-		isadmin,
-		isseller,
-		accountantt FROM users WHERE email = $1`, email).Scan(
+		qrcode,
+		role,
+		encryptedpassword FROM users WHERE email = $1`, email).Scan(
 		&u.ID,
+		&u.Photo,
 		&u.Name,
+		&u.Wezipe,
 		&u.Email,
+		&u.Qrcode,
+		&u.Role,
 		&u.EncryptedPassword,
-		&u.IsAdmin,
-		&u.IsSeller,
-		&u.Accountantt,
 	)
 
 	if err != nil {
@@ -76,7 +74,7 @@ func (req *UserRepository) FindByEmail(email string) (*model.User, error) {
 	return u, nil
 }
 
-func (req *UserRepository) UpdateUser(name, wezipe, photo, qrcode string, isadmin, isseller, accountantt bool, id int) (*model.User, error) {
+func (req *UserRepository) UpdateUser(name, wezipe, photo, qrcode, role string, id int) (*model.User, error) {
 
 	u := &model.User{}
 
@@ -85,11 +83,9 @@ func (req *UserRepository) UpdateUser(name, wezipe, photo, qrcode string, isadmi
 	name = $2,
 	wezipe = $3,
 	qrcode = $4,
-	isadmin = $5,
-	isseller = $6,
-	accountantt = $7 WHERE id = $8 RETURNING *`
+	role = $5 WHERE id = $6 RETURNING *`
 
-	err := req.store.Db.QueryRow(str, photo, name, wezipe, qrcode, isadmin, isseller, accountantt, id).Scan(
+	err := req.store.Db.QueryRow(str, photo, name, wezipe, qrcode, role, id).Scan(
 		&u.ID,
 		&u.Photo,
 		&u.Name,
@@ -97,9 +93,7 @@ func (req *UserRepository) UpdateUser(name, wezipe, photo, qrcode string, isadmi
 		&u.Email,
 		&u.EncryptedPassword,
 		&u.Qrcode,
-		&u.IsAdmin,
-		&u.IsSeller,
-		&u.Accountantt,
+		&u.Role,
 	)
 
 	if err != nil {
@@ -126,9 +120,7 @@ func (req *UserRepository) DeletUser(id int) error {
 		&u.Email,
 		&u.EncryptedPassword,
 		&u.Qrcode,
-		&u.IsAdmin,
-		&u.IsSeller,
-		&u.Accountantt,
+		&u.Role,
 	)
 
 	if err != nil {

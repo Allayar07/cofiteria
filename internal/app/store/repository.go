@@ -15,7 +15,7 @@ type UsersRepository interface {
 	Ayyrmak(*model.Product, float32) (*model.Product, error)
 	GivStatic() (*model.Product2, error)
 	UpdateProduct(*model.Product, string, float32, float32, float32) (*model.Product, error)
-	UpdateUser(string, string, string, string, bool, bool, bool, int) (*model.User, error)
+	UpdateUser(string, string, string, string, string, int) (*model.User, error)
 	DeletProduct(id int) (*model.Product, error)
 	DeletUser(int) error
 	GetAllProduct() (*sql.Rows, error)

@@ -36,11 +36,9 @@ func CreateToken(u *model.User) (*TokenDetails, error) {
 
 	atClaims := jwt.MapClaims{}
 
-	atClaims["admin"] = u.IsAdmin
+	atClaims["role"] = u.Role
 	atClaims["access_uuid"] = td.AccessUuid
-	atClaims["isSeller"] = u.IsSeller
-	atClaims["accountantt"] = u.Accountantt
-	atClaims["user_id"] = u.Email
+	atClaims["user_id"] = u.ID
 	atClaims["exp"] = td.AtExpires
 
 	at := jwt.NewWithClaims(jwt.SigningMethodHS256, atClaims)
@@ -56,10 +54,8 @@ func CreateToken(u *model.User) (*TokenDetails, error) {
 
 	rtClaims := jwt.MapClaims{}
 
-	rtClaims["admin"] = u.IsAdmin
-	rtClaims["isSeller"] = u.IsSeller
-	rtClaims["accountantt"] = u.Accountantt
-	rtClaims["user_id"] = u.Email
+	rtClaims["role"] = u.Role
+	rtClaims["user_id"] = u.ID
 	rtClaims["refresh_uuid"] = td.RefreshUuid
 	rtClaims["exp"] = td.RtExpires
 
