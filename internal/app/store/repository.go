@@ -20,4 +20,5 @@ type UsersRepository interface {
 	DeletUser(int) error
 	GetAllProduct() (*sql.Rows, error)
 	GetAllusers() (*sql.Rows, error)
+	FindByID(float64) (*model.User, error)
 }

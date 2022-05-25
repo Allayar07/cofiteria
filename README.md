@@ -1,6 +1,6 @@
 ### psql command
 create table users (
-    id bigserial not null primary key,
+    id serial not null primary key,
 	photo varchar,
 	name varchar,
 	wezipe varchar,
@@ -11,12 +11,12 @@ create table users (
 );
 
 create table product (
-	id bigserial not null primary key,
+	id serial not null primary key,
 	name varchar,
 	cost real,
 	alynanbaha real,
 	sany real,
-	shtrixcode integer
+	shtrixcode integer unique
 );
 
 create table statistic (

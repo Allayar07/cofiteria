@@ -3,11 +3,9 @@ package apiserver
 import (
 	"cofeeteria/internal/app/middlwear"
 	"cofeeteria/internal/app/model"
-	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
-	"os"
 	"time"
 
 	store "cofeeteria/internal/app/store"
@@ -45,7 +43,6 @@ func (s *Server) SettingRouter() {
 	/*  Users  */
 
 	s.router.Use(s.LogRequest)
-	s.router.HandleFunc("/Getbyemail", s.GetByemail())
 	s.router.HandleFunc("/register", middlwear.MultipleMiddleware(
 		s.Registirate(),
 		s.Authentication,
@@ -69,27 +66,22 @@ func (s *Server) SettingRouter() {
 
 	s.router.HandleFunc("/login", s.Login()).Methods("POST")
 
-	s.router.HandleFunc("/gettoken", s.GetNewAccess())
-
-	s.router.HandleFunc("/whoamI", middlwear.MultipleMiddleware(
-		s.WhoamI(),
-		s.Authentication)).Methods("GET")
+	s.router.HandleFunc("/gettoken", middlwear.MultipleMiddleware(
+		s.GetNewAccess(),
+		s.RF_Authentication)).Methods("GET")
 
 	/*  Products  */
 
 	s.router.HandleFunc("/addproduct", middlwear.MultipleMiddleware(
 		s.AddProduct(),
-		s.adminMiddlwear,
-		s.Authentication)).Methods("POST")
-
-	s.router.HandleFunc("/sellproduct", middlwear.MultipleMiddleware(
-		s.SellProduct(),
+		s.Authentication,
 		s.adminMiddlwear)).Methods("POST")
 
 	s.router.HandleFunc("/sellproduct", middlwear.MultipleMiddleware(
 		s.SellProduct(),
+		s.Authentication,
 		s.sellerMiddlwear,
-		s.Authentication)).Methods("POST")
+	)).Methods("POST")
 
 	s.router.HandleFunc("/updateproduct", middlwear.MultipleMiddleware(
 		s.UpdateProducts(),
@@ -100,11 +92,6 @@ func (s *Server) SettingRouter() {
 		s.DeletProduct(),
 		s.Authentication,
 		s.adminMiddlwear)).Methods("POST")
-
-	s.router.HandleFunc("/getallprduct", middlwear.MultipleMiddleware(
-		s.GetAll_Products(),
-		s.Authentication,
-		s.adminMiddlwear)).Methods("GET")
 
 	s.router.HandleFunc("/getallprduct", middlwear.MultipleMiddleware(
 		s.GetAll_Products(),
@@ -194,18 +181,28 @@ func (s *Server) Registirate() http.HandlerFunc {
 
 		u.Parolgizle()
 
-		s.SpecailRespond(w, r, http.StatusCreated, u)
+		type Result struct {
+			Data       interface{} `json:"data"`
+			Code       int         `json:"code"`
+			StatusText string      `json:"status_text"`
+		}
+
+		var result Result
+
+		result.Data = u
+		result.Code = http.StatusCreated
+		result.StatusText = http.StatusText(http.StatusCreated)
+
+		_ = json.NewEncoder(w).Encode(result)
 	}
 }
 
-func (s *Server) GetByemail() http.HandlerFunc {
-
+func (s *Server) GetByID() http.HandlerFunc {
 	type Request struct {
-		Email string `json:"email"`
+		ID float64 `json:"id"`
 	}
 
 	return func(w http.ResponseWriter, r *http.Request) {
-
 		req := &Request{}
 
 		err := json.NewDecoder(r.Body).Decode(req)
@@ -214,19 +211,26 @@ func (s *Server) GetByemail() http.HandlerFunc {
 			return
 		}
 
-		err = model.ValidateAny(req.Email)
+		u, err := s.store.Users().FindByID(req.ID)
 		if err != nil {
-			s.error(w, r, http.StatusBadRequest, errors.New("email can not be blank"))
+			s.error(w, r, http.StatusInternalServerError, err)
 			return
 		}
 
-		u, err := s.store.Users().FindByEmail(req.Email)
-		if err != nil {
-			s.error(w, r, http.StatusBadRequest, err)
-			return
+		type Result struct {
+			Data       interface{} `json:"data"`
+			Code       int         `json:"code"`
+			StatusText string      `json:"status_text"`
 		}
 
-		s.Respond(w, r, http.StatusOK, u)
+		var result Result
+
+		result.Data = u
+		result.Code = http.StatusOK
+		result.StatusText = http.StatusText(http.StatusOK)
+
+		_ = json.NewEncoder(w).Encode(result)
+		// s.Respond(w, r, http.StatusOK, u)
 	}
 }
 
@@ -307,6 +311,7 @@ func (s *Server) Login() http.HandlerFunc {
 func (s *Server) RF_Authentication(next http.HandlerFunc) http.HandlerFunc {
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+
 		c, err := r.Cookie("RfrCFT_Token")
 		if err != nil {
 			if err == http.ErrNoCookie {
@@ -381,7 +386,7 @@ func (s *Server) Authentication(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
-		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), store.CntKey, nil)))
+		next.ServeHTTP(w, r)
 
 	})
 }
@@ -422,13 +427,13 @@ func (s *Server) GetNewAccess() http.HandlerFunc {
 		}
 
 		if err != nil {
-			s.error(w, r, http.StatusInternalServerError, errors.New("error su yerde"))
+			s.error(w, r, http.StatusInternalServerError, err)
 			return
 		}
 
-		email := rtclaims["user_id"].(string)
+		id := rtclaims["user_id"].(float64)
 
-		u, err := s.store.Users().FindByEmail(email)
+		u, err := s.store.Users().FindByID(id)
 		if err != nil {
 			s.error(w, r, http.StatusInternalServerError, err)
 			return
@@ -438,13 +443,11 @@ func (s *Server) GetNewAccess() http.HandlerFunc {
 		td.AtExpires = time.Now().Add(time.Minute * 15).Unix()
 		td.AccessUuid = uuid.NewV4().String()
 
-		os.Setenv("ACCESS_SECRET", "jdnfksdmfksd") //this should be in an env file
-
 		atClaims := jwt.MapClaims{}
 
 		atClaims["role"] = u.Role
 		atClaims["access_uuid"] = td.AccessUuid
-		atClaims["user_id"] = u.Email
+		atClaims["user_id"] = u.ID
 		atClaims["exp"] = td.AtExpires
 
 		at := jwt.NewWithClaims(jwt.SigningMethodHS256, atClaims)
@@ -477,15 +480,6 @@ func (s *Server) GetNewAccess() http.HandlerFunc {
 
 	}
 
-}
-
-func (s *Server) WhoamI() http.HandlerFunc {
-
-	return func(w http.ResponseWriter, r *http.Request) {
-
-		s.Respond(w, r, http.StatusOK, r.Context().Value(store.CntKey).(*model.User))
-
-	}
 }
 
 func (s *Server) DeleteUsers() http.HandlerFunc {
@@ -549,11 +543,11 @@ func (s *Server) adminMiddlwear(next http.HandlerFunc) http.HandlerFunc {
 
 		cookie := c.Value
 
-		claims := jwt.MapClaims{}
+		atClaims := jwt.MapClaims{}
 
 		token, err := jwt.ParseWithClaims(
 			cookie,
-			claims,
+			atClaims,
 			func(t *jwt.Token) (interface{}, error) {
 
 				return Secretkey, nil
@@ -570,7 +564,7 @@ func (s *Server) adminMiddlwear(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
-		if claims["role"].(string) != "admin" {
+		if atClaims["role"].(string) != "admin" {
 			s.error(w, r, http.StatusForbidden, errors.New("bu sahypa dosdubynyz yok"))
 			return
 		}
@@ -583,23 +577,27 @@ func (s *Server) sellerMiddlwear(next http.HandlerFunc) http.HandlerFunc {
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 
-		c, err := r.Cookie("ACCessCFT_Token")
-		if err != nil {
-			if err == http.ErrNoCookie {
-				s.error(w, r, http.StatusUnauthorized, err)
-				return
-			}
-			s.error(w, r, http.StatusUnauthorized, err)
-			return
-		}
+		// c, err := r.Cookie("ACCessCFT_Token")
+		// if err != nil {
+		// 	if err == http.ErrNoCookie {
+		// 		s.error(w, r, http.StatusUnauthorized, err)
+		// 		return
+		// 	}
+		// 	s.error(w, r, http.StatusUnauthorized, err)
+		// 	return
+		// }
 
-		cookie := c.Value
+		// cookie := c.Value
 
-		claims := jwt.MapClaims{}
+		a := r.Header.Get("Authorization")
+
+		cookie := a
+
+		atClaims := jwt.MapClaims{}
 
 		token, err := jwt.ParseWithClaims(
 			cookie,
-			claims,
+			atClaims,
 			func(t *jwt.Token) (interface{}, error) {
 
 				return Secretkey, nil
@@ -616,11 +614,14 @@ func (s *Server) sellerMiddlwear(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
-		if claims["role"].(string) != "satyjy" {
+		if atClaims["role"].(string) == "satyjy" || atClaims["role"].(string) == "admin" {
+
+			next.ServeHTTP(w, r)
+
+		} else {
 			s.error(w, r, http.StatusForbidden, errors.New("bu sahypa dosdubynyz yok bu statyjy ucn"))
 			return
 		}
-		next.ServeHTTP(w, r)
 	})
 }
 
@@ -661,11 +662,17 @@ func (s *Server) accountanttMiddlwear(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
-		if claims["role"].(string) != "hasapcy" {
+		if claims["role"].(string) == "hasapcy" || claims["role"].(string) == "admin" {
+
+			next.ServeHTTP(w, r)
+
+		} else {
+
 			s.error(w, r, http.StatusForbidden, errors.New("bu sahypa dosdubynyz yok bu buhgalter ucn"))
 			return
+
 		}
-		next.ServeHTTP(w, r)
+
 	})
 }
 
@@ -737,7 +744,21 @@ func (s *Server) AddProduct() http.HandlerFunc {
 				s.error(w, r, http.StatusUnprocessableEntity, err)
 				return
 			}
-			s.Respond(w, r, http.StatusCreated, p)
+
+			type Result struct {
+				Data       interface{} `json:"data"`
+				Code       int         `json:"code"`
+				StatusText string      `json:"status_text"`
+			}
+
+			var result Result
+
+			result.Data = p
+			result.Code = http.StatusCreated
+			result.StatusText = http.StatusText(http.StatusCreated)
+
+			_ = json.NewEncoder(w).Encode(result)
+			// s.Respond(w, r, http.StatusCreated, p)
 
 		} else {
 
@@ -752,7 +773,20 @@ func (s *Server) AddProduct() http.HandlerFunc {
 				s.error(w, r, http.StatusUnprocessableEntity, err)
 				return
 			}
-			s.SpecailRespond(w, r, http.StatusCreated, product)
+
+			type Result struct {
+				Data       interface{} `json:"data"`
+				Code       int         `json:"code"`
+				StatusText string      `json:"status_text"`
+			}
+
+			var result Result
+
+			result.Data = product
+			result.Code = http.StatusCreated
+			result.StatusText = http.StatusText(http.StatusCreated)
+
+			_ = json.NewEncoder(w).Encode(result)
 		}
 	}
 }
@@ -931,7 +965,20 @@ func (s *Server) UpdateProducts() http.HandlerFunc {
 			return
 		}
 
-		s.SpecailRespond(w, r, http.StatusOK, p)
+		type Result struct {
+			Data       interface{} `json:"data"`
+			Code       int         `json:"code"`
+			StatusText string      `json:"status_text"`
+		}
+
+		var result Result
+
+		result.Data = p
+		result.Code = http.StatusOK
+		result.StatusText = http.StatusText(http.StatusOK)
+
+		_ = json.NewEncoder(w).Encode(result)
+
 	}
 }
 
@@ -998,7 +1045,19 @@ func (s *Server) UpdateUsers() http.HandlerFunc {
 			return
 		}
 
-		s.SpecailRespond(w, r, http.StatusOK, u)
+		type Result struct {
+			Data       interface{} `json:"data"`
+			Code       int         `json:"code"`
+			StatusText string      `json:"status_text"`
+		}
+
+		var result Result
+
+		result.Data = u
+		result.Code = http.StatusOK
+		result.StatusText = http.StatusText(http.StatusOK)
+
+		_ = json.NewEncoder(w).Encode(result)
 	}
 }
 
@@ -1089,7 +1148,20 @@ func (s *Server) Statics() http.HandlerFunc {
 			return
 		}
 
-		s.SpecailRespond(w, r, http.StatusOK, p)
+		type Result struct {
+			Data       interface{} `json:"data"`
+			Code       int         `json:"code"`
+			StatusText string      `json:"status_text"`
+		}
+
+		var result Result
+
+		result.Data = p
+		result.Code = http.StatusOK
+		result.StatusText = http.StatusText(http.StatusOK)
+
+		_ = json.NewEncoder(w).Encode(result)
+
 	}
 }
 
@@ -1102,34 +1174,31 @@ func (s *Server) error(w http.ResponseWriter, r *http.Request, code int, err err
 	})
 }
 
-func (s *Server) Respond(w http.ResponseWriter, r *http.Request, code int, data ...interface{}) {
+func (s *Server) Respond(w http.ResponseWriter, r *http.Request, code int, data interface{}) {
 
 	if data != nil {
 
-		for i := 0; i < len(data); i++ {
+		json.NewEncoder(w).Encode(data)
 
-			json.NewEncoder(w).Encode(data[i])
-
-		}
 	}
 }
 
-func (s *Server) SpecailRespond(w http.ResponseWriter, r *http.Request, code int, data interface{}) {
+// func (s *Server) SpecailRespond(w http.ResponseWriter, r *http.Request, code int, data interface{}) {
 
-	w.WriteHeader(code)
+// 	w.WriteHeader(code)
 
-	type Result struct {
-		Data       interface{} `json:"data"`
-		StatusText string      `json:"status_text"`
-		StatusCode int         `json:"status_code"`
-	}
-	var result Result
-	result.StatusCode = code
-	result.StatusText = http.StatusText(code)
-	result.Data = data
-	
-	json.NewEncoder(w).Encode(result)
-}
+// 	type Result struct {
+// 		Data       interface{} `json:"data"`
+// 		StatusText string      `json:"status_text"`
+// 		StatusCode int         `json:"status_code"`
+// 	}
+// 	var result Result
+// 	result.StatusCode = code
+// 	result.StatusText = http.StatusText(code)
+// 	result.Data = data
+
+// 	json.NewEncoder(w).Encode(result)
+// }
 
 func (s *Server) LogRequest(param http.Handler) http.Handler {
 

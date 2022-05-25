@@ -74,6 +74,44 @@ func (req *UserRepository) FindByEmail(email string) (*model.User, error) {
 	return u, nil
 }
 
+func (req *UserRepository) FindByID(id float64) (*model.User, error) {
+
+	u := &model.User{}
+
+	str := `SELECT 
+		id,
+		photo,
+		name,
+		wezipe,
+		email,
+		qrcode,
+		role,
+		encryptedpassword FROM users WHERE id = $1`
+
+	err := req.store.Db.QueryRow(str, id).Scan(
+		&u.ID,
+		&u.Photo,
+		&u.Name,
+		&u.Wezipe,
+		&u.Email,
+		&u.Qrcode,
+		&u.Role,
+		&u.EncryptedPassword,
+	)
+
+	if err != nil {
+
+		if err == sql.ErrNoRows {
+			return nil, store.ErrorNotFoundRecord
+		}
+
+		return nil, err
+	}
+
+	return u, nil
+
+}
+
 func (req *UserRepository) UpdateUser(name, wezipe, photo, qrcode, role string, id int) (*model.User, error) {
 
 	u := &model.User{}
